@@ -1,0 +1,113 @@
+name: "Azure Packer Image Build"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  packer-build:
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./coustomImage
+
+    env:
+      PKR_VAR_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+      PKR_VAR_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      PKR_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+      PKR_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      PKR_VAR_location: ${{ vars.LOCATION }}
+      PKR_VAR_managed_image_resource_group_name: ${{ vars.GALLERY_RG }}
+      PKR_VAR_gallery_resource_group: ${{ vars.GALLERY_RG }}
+      PKR_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
+      PKR_VAR_gallery_image_definition_name: ${{ vars.IMAGE_DEFINITION }}
+      PKR_VAR_gallery_image_version: ${{ vars.IMAGE_VERSION }}
+      PKR_VAR_image_name: "netflix-base-image-${{ github.run_number }}"
+      PKR_VAR_vm_size: "Standard_D2s_v3"
+      PKR_VAR_image_offer: "0001-com-ubuntu-server-jammy"
+      PKR_VAR_image_sku: "22_04-lts"
+
+    steps:
+    # 1. Checkout repository code
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 2. Install and configure Packer on the runner
+    - name: Setup Packer
+      uses: hashicorp/setup-packer@main
+      with:
+        version: "latest"
+
+    # 3. Initialize Packer plugins
+    - name: Packer Init
+      run: packer init .
+
+    # 4. Run syntax validation on Packer configuration
+    - name: Packer Validate
+      run: packer validate .
+
+    # 5. Authenticate to Azure via Service Principal
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+    # 6. AZ CLI Task 1: Automatically create Resource Group if missing
+    - name: AZ CLI - Create Resource Group
+      uses: azure/cli@v2
+      with:
+        azcliversion: latest
+        inlineScript: |
+          echo "Creating Resource Group if it doesn't exist..."
+          az group create --name "${{ vars.GALLERY_RG }}" --location "${{ vars.LOCATION }}"
+
+    # 7. AZ CLI Task 2: Automatically create Azure Compute Gallery if missing
+    - name: AZ CLI - Create Azure Compute Gallery
+      uses: azure/cli@v2
+      with:
+        azcliversion: latest
+        inlineScript: |
+          echo "Checking and Creating Compute Gallery..."
+          az sig show --resource-group "${{ vars.GALLERY_RG }}" --gallery-name "${{ vars.GALLERY_NAME }}" || \
+          az sig create --resource-group "${{ vars.GALLERY_RG }}" --gallery-name "${{ vars.GALLERY_NAME }}" --location "${{ vars.LOCATION }}"
+
+    # 8. AZ CLI Task 3: Automatically create Image Definition if missing
+    - name: AZ CLI - Create Image Definition
+      uses: azure/cli@v2
+      with:
+        azcliversion: latest
+        inlineScript: |
+          echo "Checking and Creating Image Definition inside the Gallery..."
+          az sig image-definition show --resource-group "${{ vars.GALLERY_RG }}" --gallery-name "${{ vars.GALLERY_NAME }}" --gallery-image-definition "${{ vars.IMAGE_DEFINITION }}" || \
+          az sig image-definition create \
+            --resource-group "${{ vars.GALLERY_RG }}" \
+            --gallery-name "${{ vars.GALLERY_NAME }}" \
+            --gallery-image-definition "${{ vars.IMAGE_DEFINITION }}" \
+            --publisher "canonical" \
+            --offer "0001-com-ubuntu-server-jammy" \
+            --sku "22_04-lts" \
+            --os-type "Linux" \
+            --location "${{ vars.LOCATION }}"
+
+    # 9. Execute Packer Build to bake the custom image
+    - name: Packer Build
+      run: packer build .
+
+    # 10. Output metadata details to the GitHub Actions Job Summary Dashboard
+    - name: Generate Deployment Summary
+      if: success()
+      run: |
+        echo "## Custom Image Built Successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "The pipeline has successfully provisioned the underlying infrastructure and baked the custom image without manual intervention." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Resource Type | Resource Name |" >> $GITHUB_STEP_SUMMARY
+        echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Resource Group** | \`${{ vars.GALLERY_RG }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Compute Gallery** | \`${{ vars.GALLERY_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Image Definition** | \`${{ vars.IMAGE_DEFINITION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Image Version** | \`${{ vars.IMAGE_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo " **Azure Portal Path:** \`/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ vars.GALLERY_RG }}/providers/Microsoft.Compute/galleries/${{ vars.GALLERY_NAME }}/images/${{ vars.IMAGE_DEFINITION }}/versions/${{ vars.IMAGE_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
