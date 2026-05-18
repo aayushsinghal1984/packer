@@ -19,16 +19,6 @@ jobs:
       PKR_VAR_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
       PKR_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
       PKR_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      PKR_VAR_location: ${{ vars.LOCATION }}
-      PKR_VAR_managed_image_resource_group_name: ${{ vars.GALLERY_RG }}
-      PKR_VAR_gallery_resource_group: ${{ vars.GALLERY_RG }}
-      PKR_VAR_gallery_name: ${{ vars.GALLERY_NAME }}
-      PKR_VAR_gallery_image_definition_name: ${{ vars.IMAGE_DEFINITION }}
-      PKR_VAR_gallery_image_version: ${{ vars.IMAGE_VERSION }}
-      PKR_VAR_image_name: "netflix-base-image-${{ github.run_number }}"
-      PKR_VAR_vm_size: "Standard_D2s_v3"
-      PKR_VAR_image_offer: "0001-com-ubuntu-server-jammy"
-      PKR_VAR_image_sku: "22_04-lts"
 
     steps:
     # 1. Checkout repository code
